@@ -174,7 +174,7 @@
     <div id="canvas-container">
         <canvas id="shaderCanvas" width="720" height="360"></canvas>
         <div class="canvas-controls">
-            <button id="pausePlayBtn" class="playing-state" onclick="togglePause()">Pause (Alt+S)</button>
+            <button id="pausePlayBtn" class="paused-state" onclick="togglePause()">Play (Alt+S)</button>
         </div>
     </div>
 
@@ -193,7 +193,7 @@
                 </div>
             </div>
             <div class="editor-container">
-                <div id="line-numbers">1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22<br>23<br>24<br>25<br>26<br>27<br>28<br>29<br>30<br>31<br>32<br>33<br>34<br>35<br>36<br>37<br>38<br>39<br>40<br>41<br>42<br>43<br>44<br>45<br>46<br>47<br>48<br>49<br>50<br>51<br>52<br>53<br>54<br>55<br>56<br>57<br>58<br>59<br>60<br>61<br>62<br>63<br>64<br>65<br>66<br>67<br>68<br>69<br>70<br>71<br>72<br>73<br>74<br>75<br>76<br>77<br>78<br>79<br>80<br>81<br>82<br>83<br>84<br>85<br>86<br>87<br>88<br>89<br>90<br>91<br>92<br>93<br>94<br>95<br>96<br>97<br>98<br>99<br>100<br>101<br>102<br>103<br>104<br>105<br>106<br>107<br>108<br>109<br>110<br>111<br>112<br>113<br>114<br>115<br>116<br>117<br>118<br>119</div>
+                <div id="line-numbers">1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22<br>23<br>24<br>25<br>26<br>27<br>28<br>29<br>30<br>31<br>32<br>33<br>34<br>35<br>36<br>37<br>38<br>39<br>40<br>41<br>42<br>43<br>44<br>45<br>46<br>47<br>48<br>49<br>50<br>51<br>52<br>53<br>54<br>55<br>56<br>57<br>58<br>59<br>60<br>61<br>62<br>63<br>64<br>65<br>66<br>67<br>68<br>69<br>70<br>71<br>72<br>73<br>74<br>75<br>76<br>77<br>78<br>79<br>80<br>81<br>82<br>83<br>84<br>85<br>86<br>87<br>88<br>89<br>90<br>91<br>92<br>93<br>94<br>95<br>96<br>97<br>98<br>99<br>100<br>101<br>102<br>103<br>104<br>105<br>106<br>107<br>108<br>109<br>110<br>111<br>112<br>113<br>114<br>115<br>116<br>117<br>118<br>119<br>120<br>121<br>122<br>123<br>124<br>125<br>126<br>127<br>128<br>129<br>130<br>131<br>132<br>133<br>134<br>135<br>136<br>137<br>138<br>139<br>140<br>141<br>142<br>143<br>144<br>145<br>146<br>147<br>148<br>149</div>
                 <textarea id="shaderEditor" spellcheck="false" oninput="updateLineNumbers()" onscroll="syncScroll()">#version 300 es
 precision highp float;
 
@@ -201,17 +201,40 @@ uniform float u_time;
 uniform vec2 u_resolution;
 out vec4 outColor;
 
-#define MAX_STEPS 100
+#define MAX_STEPS 150
 #define SURF_DIST 0.001
-#define MAX_DIST 20.0
+#define MAX_DIST 40.0
 
-vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+// --- GRID CONFIGURATION ---
+// Matrix Input:
+// [0, 1, 0]  (Row 1 - "Top")
+// [1, 1, 1]  (Row 0 - "Bottom")
+int getMatrixValue(int x, int z) {
+    if (z == 0) { // Bottom Row
+        if (x == 0) return 1;
+        if (x == 1) return 1;
+        if (x == 2) return 1;
+    } else if (z == 1) { // Top Row
+        if (x == 0) return 0;
+        if (x == 1) return 1;
+        if (x == 2) return 0;
+    }
+    return 0;
 }
 
-// Quadratic B-Spline Basis Functions
+// --- NOISE &amp; MOTION ---
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float getPointHeight(int i, int j) {
+    vec2 id = vec2(float(i), float(j));
+    float h = hash(id);
+    // Oscillate points. Neighbors share these points, keeping the mesh united.
+    return sin(u_time * 1.5 + float(i) * 0.7 + float(j) * 0.5) * 0.4 + (h * 0.1);
+}
+
+// --- B-SPLINE ENGINE ---
 float basis(int i, float t) {
     if (i == 0) return 0.5 * (1.0 - t) * (1.0 - t);
     if (i == 1) return 0.5 + (t - t * t);
@@ -219,100 +242,107 @@ float basis(int i, float t) {
     return 0.0;
 }
 
-float getPatchHeight(vec2 uv) {
-    // Weights for a Rational surface (NURBS-like)
-    float W[9] = float[](1.0, 1.5, 1.0, 1.5, 4.0, 1.5, 1.0, 1.5, 1.0);
-    float Z[9];
+float getGlobalHeight(vec2 p) {
+    // Map world space to grid space (cells are 2.0 units wide)
+    vec2 st = (p * 0.5) + vec2(1.5, 1.0); 
+    ivec2 cell = ivec2(floor(st));
+    vec2 local = fract(st);
     
-    // Control Points Animation
-    for(int i = 0; i &lt; 9; i++) {
-        float x = float(i % 3);
-        float y = float(i / 3);
-        Z[i] = sin(u_time * 1.5 + (x * 2.1 + y * 1.2)) * 0.6;
-    }
-
     float num = 0.0;
     float den = 0.0;
+    
+    // 3x3 point sampling for Quadratic B-Spline interpolation
     for (int j = 0; j &lt; 3; j++) {
-        float Bv = basis(j, uv.y);
+        float Bv = basis(j, local.y);
         for (int i = 0; i &lt; 3; i++) {
-            float Bu = basis(i, uv.x);
-            float wB = Bu * Bv * W[j * 3 + i];
-            num += wB * Z[j * 3 + i];
-            den += wB;
+            float Bu = basis(i, local.x);
+            num += Bu * Bv * getPointHeight(cell.x + i, cell.y + j);
+            den += Bu * Bv;
         }
     }
-    return num / den;
+    return (den &gt; 0.0) ? (num / den) : 0.0;
 }
 
+// --- RAYMARCHING ---
 float GetDist(vec3 p) {
-    // Clamp UVs to [0, 1] for the patch logic
-    vec2 uv = clamp(p.xz * 0.5 + 0.5, 0.0, 1.0); 
-    float h = getPatchHeight(uv);
+    // Calculate which cell we are currently in
+    float gridX = floor(p.x * 0.5 + 1.5);
+    float gridZ = floor(p.z * 0.5 + 1.0);
     
-    // Vertical distance to the surface
-    float d = (p.y - h) * 0.6; 
+    // renamed 'active' to 'isActive' to avoid GLSL reserved word error
+    int isActive = getMatrixValue(int(gridX), int(gridZ));
     
-    // Bounds volume: effectively hides everything outside the -1.0 to 1.0 xz square
-    vec2 bound = abs(p.xz) - 1.0;
-    float outside = length(max(bound, 0.0));
+    // Distance to the interpolated height surface
+    float h = getGlobalHeight(p.xz);
+    float distToSurf = abs(p.y - h) - 0.04;
     
-    return max(d, outside);
+    // Boundary Box logic for each cell
+    vec2 center = vec2(gridX * 2.0 - 2.0, gridZ * 2.0 - 1.0);
+    vec2 localPos = abs(p.xz - center) - vec2(1.0);
+    float bounds = length(max(localPos, 0.0));
+    
+    float cellDist = max(distToSurf * 0.5, bounds);
+    
+    // If the matrix cell is 0, we treat it as empty space (very high distance)
+    return (isActive == 1) ? cellDist : bounds + 0.1;
 }
 
 vec3 GetNormal(vec3 p) {
     vec2 e = vec2(0.01, 0.0);
     return normalize(vec3(
-        GetDist(p+e.xyy) - GetDist(p-e.xyy),
-        GetDist(p+e.yxy) - GetDist(p-e.yxy),
-        GetDist(p+e.yyx) - GetDist(p-e.yyx)
+        GetDist(p + e.xyy) - GetDist(p - e.xyy),
+        GetDist(p + e.yxy) - GetDist(p - e.yxy),
+        GetDist(p + e.yyx) - GetDist(p - e.yyx)
     ));
 }
 
 void main() {
-    vec2 uv_screen = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
     
-    float angle = u_time * 0.2;
-    float camY = 1.8 + sin(u_time * 0.5) * 0.5; 
-    vec3 ro = vec3(2.5 * cos(angle), camY, 2.5 * sin(angle));
+    // Camera
+    vec3 ro = vec3(0.0, 5.0, 7.0);
+    vec3 rd = normalize(vec3(uv.x, uv.y - 0.5, -0.9));
     
-    vec3 lookat = vec3(0, -0.2, 0);
-    vec3 f = normalize(lookat - ro);
-    vec3 r = normalize(cross(vec3(0, 1, 0), f));
-    vec3 u = cross(f, r);
-    vec3 rd = normalize(f + uv_screen.x * r + uv_screen.y * u);
+    // Rotation Orbit
+    float camRot = u_time * 0.3;
+    mat2 rot = mat2(cos(camRot), -sin(camRot), sin(camRot), cos(camRot));
+    ro.xz *= rot; rd.xz *= rot;
 
     float dO = 0.0;
-    for(int i=0; i&lt;MAX_STEPS; i++) {
+    bool hit = false;
+    for(int i = 0; i &lt; MAX_STEPS; i++) {
         float dS = GetDist(ro + rd * dO);
-        if(dS &lt; SURF_DIST || dO &gt; MAX_DIST) break;
         dO += dS;
+        if(abs(dS) &lt; SURF_DIST) { hit = true; break; }
+        if(dO &gt; MAX_DIST) break;
     }
 
-    vec3 color = vec3(0.02, 0.02, 0.04); // Dark Background
+    vec3 col = vec3(0.01, 0.01, 0.02); // Dark space
 
-    if(dO &lt; MAX_DIST) {
+    if(hit) {
         vec3 p = ro + rd * dO;
         vec3 n = GetNormal(p);
-        vec2 sheetUV = p.xz * 0.5 + 0.5;
         
-        // Coloring
-        float hue = 0.5 + (p.y * 0.3);
+        // Coloring based on grid position
+        vec3 colA = vec3(0.0, 0.8, 0.6);
+        vec3 colB = vec3(0.6, 0.1, 0.9);
+        vec3 baseCol = mix(colA, colB, sin(p.x * 0.4 + p.z * 0.4) * 0.5 + 0.5);
+        
         float diff = dot(n, normalize(vec3(1, 2, 3))) * 0.5 + 0.5;
-        color = hsv2rgb(vec3(hue, 0.7, diff));
+        col = baseCol * diff;
         
-        // Grid
-        vec2 grid = abs(fract(sheetUV * 10.0 - 0.5) - 0.5) / fwidth(sheetUV * 10.0);
-        float line = smoothstep(1.2, 0.0, min(grid.x, grid.y));
-        color += line * 0.15;
+        // Subtle grid lines
+        vec2 gridLines = abs(fract(p.xz * 0.5 + 0.5) - 0.5);
+        float line = smoothstep(0.05, 0.0, min(gridLines.x, gridLines.y));
+        col += line * 0.15;
         
-        // Polish
-        float fresnel = pow(1.0 - max(0.0, dot(n, -rd)), 5.0);
-        color += fresnel * 0.5;
+        // Fresnel highlight
+        col += pow(1.0 - max(0.0, dot(n, -rd)), 3.0) * 0.4;
     }
 
-    outColor = vec4(pow(color, vec3(0.8)), 1.0);
-}                        </textarea>
+    // Gamma correction
+    outColor = vec4(pow(col, vec3(0.4545)), 1.0);
+}</textarea>
             </div>
         </div>
 
@@ -321,7 +351,12 @@ void main() {
                 <span>System Output</span>
                 <span id="term-status-icon">▼</span>
             </div>
-            <div id="terminal"><div class="log-entry update"><span class="time">[55ms]</span><span class="content">Shader Compiled Successfully</span></div><div class="log-entry update"><span class="time">[1048ms]</span><span class="content">Time: 4801.11s | FPS: 144</span></div></div>
+            <div id="terminal"><div class="log-entry update"><span class="time">[243ms]</span><span class="content">Full HTML Project Exported</span></div><div class="log-entry update"><span class="time">[797ms]</span><span class="content">Time: 723.44s | FPS: Infinity</span></div><div class="log-entry error"><span class="time">[46034ms]</span><span class="content">COMPILE ERROR: ERROR: 0:77: 'active' : Illegal use of reserved word
+ERROR: 0:77: 'active' : syntax error
+</span></div><div class="log-entry error"><span class="time">[46777ms]</span><span class="content">COMPILE ERROR: ERROR: 0:77: 'active' : Illegal use of reserved word
+ERROR: 0:77: 'active' : syntax error
+</span></div><div class="log-entry error"><span class="time">[102607ms]</span><span class="content">COMPILE ERROR: ERROR: 0:108: '-' : wrong operand types - no operation '-' exists that takes a left-hand operand of type 'highp float' and a right operand of type 'const int' (or there is no acceptable conversion)
+</span></div></div>
         </div>
     </div>
 
